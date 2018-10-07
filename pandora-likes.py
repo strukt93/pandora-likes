@@ -12,6 +12,7 @@ auth_token = ""
 webname = ""
 likes_length = 0
 likes = []
+premium = False
 
 #Prompts the user for their Pandora credentials
 def get_creds():
@@ -73,7 +74,7 @@ def fetch_likes_length():
         response = requests.post(pandora_base + path, json=params, cookies=cookies, headers=headers)
         global likes_length
         likes_length = int(response.json()['total'])
-        print "Found " + str(likes_length) + " likes..."
+        print "Found " + str(likes_length) + " likes"
     except:
         print "An error occurred, aborting..."
         exit() 
@@ -106,9 +107,12 @@ def fetch_likes():
                 likes.append({
                     "song_title": feedback['songTitle'].encode("utf-8"),
                     "artist_name": feedback['artistName'].encode("utf-8"),
-                    "album_title": feedback['albumTitle'].encode("utf-8")
+                    "album_title": feedback['albumTitle'].encode("utf-8"),
+                    "music_id": feedback['musicId'][1:].encode("utf-8"),
+                    "audio_url": "N/A"
                 })
             start_index = start_index + 100
+        check_on_demand()
     except:
         print "An error occurred, aborting..."
         exit()
@@ -123,21 +127,65 @@ def write_likes():
             .Head { background-color:gray; color:white; }
             </style></head><body>
             <table border=1>
-            <tr><td class=Head>Song Title</td><td class=Head>Artist Name</td><td class=Head>Album Title</td></tr>
+            <tr><td class=Head>Song Title</td><td class=Head>Artist Name</td><td class=Head>Album Title</td><td class=Head>Music ID</td><td class=Head>Audio URL</td></tr>
             """
     try:
         with open(file_name, "w") as likes_file:
             likes_file.write(top)
             for like in likes:
-                line = "<tr><td>" + like['song_title'] + "</td><td>" + like['artist_name'] + "</td><td>" + like['album_title'] + "</td></tr>"
+                line = "<tr><td>" + like['song_title'] + "</td><td>" + like['artist_name'] + "</td><td>" + like['album_title'] + "</td><td>" + like['music_id'] + "</td><td>" + like['audio_url'] + "</td></tr>"
                 likes_file.write(line)
             likes_file.write("</table></body></html>")
         likes_file.close()
         print "Likes written to " + file_name + ", open it with a browser or in Excel"
     except:
         print "Likes file couldn't be written, aborting..."
-        exit()
+    exit()
 
-funcs = [get_creds, get_csrf_cookie, authenticate, fetch_likes_length, fetch_likes, write_likes]
+def get_playback_url(music_id):
+    path = "/api/v1/ondemand/getAudioPlaybackInfo"
+    cookies = {
+        "csrftoken": csrf_token
+    }
+    headers = {
+        csrf_header: csrf_token,
+        auth_token_header: auth_token
+    }
+    params = {
+        "pandoraId": "TR:" + str(music_id),
+        "sourcePandoraId": "TR:" + str(music_id)
+    }
+    response = requests.post(pandora_base + path, json=params, cookies=cookies, headers=headers)
+    try:
+        return response.json()['audioURL'].encode("utf-8")
+    except:
+        return response.json()['errorString'].encode("utf-8")
+
+def check_on_demand():
+    playback_message = get_playback_url(1)
+    if  playback_message == "LISTENER_NOT_AUTHORIZED":
+        print "User is not a Pandora Premium subscriber, likes can't be downloaded"
+    else:
+        global premium
+        premium = True
+        print "User is a Pandora Premium subscriber, likes can be downloaded"
+
+def download_likes():
+    print "Downloading liked tracks..."
+    i = 1.0
+    for like in likes:
+        like['audio_url'] = get_playback_url(like['music_id'])
+        if i%20 == 0:
+            print "{0:.0f}% done".format((i/likes_length) * 100)
+        i += 1
+
+def download_prompt():
+    if not premium:
+        return
+    download = raw_input("Attempt to download liked tracks? [y/n]")
+    if download.lower() == 'y':
+        download_likes()
+
+funcs = [get_creds, get_csrf_cookie, authenticate, fetch_likes_length, fetch_likes, download_prompt, write_likes]
 for func in funcs:
     func()
