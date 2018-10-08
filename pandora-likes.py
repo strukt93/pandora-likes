@@ -1,6 +1,9 @@
-import requests
+import requests #pip install requests
 import json
 import getpass
+import os
+import eyed3 #pip install python-magic-bin==0.4.14
+import re
 
 username = ""
 password = ""
@@ -170,19 +173,58 @@ def check_on_demand():
         premium = True
         print "User is a Pandora Premium subscriber, likes can be downloaded"
 
+def create_download_folder():
+    try:
+        if not os.path.exists(webname):
+            os.makedirs(webname)
+        else:
+            print "Download folder already exists"
+            return False
+    except:
+        print "Error creating download folder, check your permissions"
+        return False
+    return True
+
+def set_mp3_details(like, file_path):
+    mp3_file = eyed3.load(file_path)
+    mp3_file.initTag()
+    mp3_file.tag.artist = like['artist_name'].decode('utf-8', 'ignore')
+    mp3_file.tag.album = like['album_title'].decode('utf-8', 'ignore')
+    mp3_file.tag.album_artist = like['artist_name'].decode('utf-8', 'ignore')
+    mp3_file.tag.title = like['song_title'].decode('utf-8', 'ignore')
+    mp3_file.tag.save()
+
 def download_likes():
+    if not create_download_folder():
+        return
     print "Downloading liked tracks..."
     i = 1.0
     for like in likes:
         like['audio_url'] = get_playback_url(like['music_id'])
+        audio_url = get_playback_url(like['music_id'])
+        if not audio_url.startswith("http"):
+            print '"' + like['song_title'] + '" couldn\'t be downloaded due to Pandora\'s policy'
+            continue
+        mp3_blob = requests.get(audio_url, stream=True)
+        song_title = like['song_title']
+        for c in r'/\:?"*<>|':
+            song_title = song_title.replace(c, '')
+        mp3_filename = webname + '/' + song_title + '.mp3'
+        with open(mp3_filename, 'wb') as mp3_file:
+            for chunk in mp3_blob.iter_content(chunk_size=1024):
+                if chunk:
+                    mp3_file.write(chunk)
+        set_mp3_details(like, mp3_filename)
+        print 'Downloaded "' + like['song_title'] + '"'
         if i%20 == 0:
             print "{0:.0f}% done".format((i/likes_length) * 100)
         i += 1
+        # print "An error occurred while downloading the likes, aborting..."
 
 def download_prompt():
     if not premium:
         return
-    download = raw_input("Attempt to download liked tracks? [y/n]")
+    download = raw_input("Attempt to download liked tracks? [y/n] ")
     if download.lower() == 'y':
         download_likes()
 
